@@ -70,3 +70,9 @@ coverage.xml
 
 # Other
 *.sqlite3
+
+#database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal

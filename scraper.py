@@ -2,135 +2,113 @@ import requests
 import feedparser
 import sqlite3
 import time
+from bs4 import BeautifulSoup
 from flask import Flask, jsonify
+from log_wrapper import LogWrapper 
+
+logger = LogWrapper(name="job_scraper").logger
 
 DB_NAME = "jobs.sqlite"
+KEYWORDS = ["junior", "entry", "graduate", "intern", "trainee", "associate", "apprentice", "new grad", "new graduate", "fresh graduate", "fresh grad", "recent graduate"]
 
-# =========================
-# Database Setup
-# =========================
+def matches_keywords(text):
+    return any(k in text.lower() for k in KEYWORDS)
+
+def exclude_keywords(text):
+    exclude = ["senior", "lead", "manager", "director", "architect", "vp", "executive", "principal", "experienced", "expert", "Sr."]
+    return not any(k in text.lower() for k in exclude)
+
 def init_db():
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source TEXT,
-            title TEXT,
-            company TEXT,
-            date_posted TEXT,
-            location TEXT,
-            url TEXT UNIQUE,
-            description TEXT
-        )
-    """)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT,
+        title TEXT,
+        company TEXT,
+        date TEXT,
+        location TEXT,
+        url TEXT UNIQUE,
+        description TEXT
+    )""")
     conn.commit()
     conn.close()
 
-# =========================
-# Save Job (Avoid Duplicates)
-# =========================
 def save_job(job):
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    c = conn.cursor()
     try:
-        cursor.execute("""
-            INSERT INTO jobs (source, title, company, date_posted, location, url, description)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            job["source"], job["title"], job["company"],
-            job["date"], job["location"], job["url"], job["description"]
-        ))
+        c.execute("INSERT INTO jobs (source, title, company, date, location, url, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (job["source"], job["title"], job["company"], job["date"], job["location"], job["url"], job["description"]))
         conn.commit()
+        logger.info(f"Saved job: {job['title']} at {job['company']} ({job['source']})")
     except sqlite3.IntegrityError:
-        # URL already exists (duplicate)
-        print(f"Duplicate job found: {job['url']}, skipping.")
-        pass
-    finally:
-        conn.close()
+        logger.debug(f"Duplicate job skipped: {job['title']} ({job['source']})")
+    conn.close()
 
-# =========================
-# Scraper Functions
-# =========================
 def scrape_remoteok():
-    print("Scraping RemoteOK...")
-    url = "https://remoteok.com/api"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    time.sleep(2)  # polite delay
-    response = requests.get(url, headers=headers)
+    logger.info("Scraping RemoteOK...")
+    time.sleep(2)
     jobs = []
-
-    if response.status_code == 200:
-        data = response.json()[1:]  # first item is metadata
-        for job in data:
-            if "junior" in job["position"].lower():
-                jobs.append({
-                    "source": "RemoteOK",
-                    "title": job["position"],
-                    "company": job["company"],
-                    "date": job["date"],
-                    "location": job.get("location", "Remote"),
-                    "url": job["url"],
-                    "description": job.get("description", "")[:200] + "..."
-                })
+    try:
+        response = requests.get("https://remoteok.com/api", headers={"User-Agent": "Mozilla/5.0"})
+        if response.ok:
+            for job in response.json()[1:]:
+                if matches_keywords(job.get("position", "")) or exclude_keywords(job.get("position", "")):
+                    jobs.append({
+                        "source": "RemoteOK",
+                        "title": job["position"],
+                        "company": job["company"],
+                        "date": job["date"],
+                        "location": job.get("location", "Remote"),
+                        "url": job["url"],
+                        "description": job.get("description", "")[:200] + "..."
+                    })
+        logger.info(f"RemoteOK found {len(jobs)} matching jobs.")
+    except Exception as e:
+        logger.error(f"Error scraping RemoteOK: {e}")
     return jobs
 
 def scrape_weworkremotely():
-    print("Scraping WeWorkRemotely...")
-    url = "https://weworkremotely.com/categories/remote-programming-jobs.rss"
-    time.sleep(2)  # polite delay
-    feed = feedparser.parse(url)
+    logger.info("Scraping WeWorkRemotely...")
+    time.sleep(2)
     jobs = []
-
-    for entry in feed.entries:
-        if "junior" in entry.title.lower():
-            jobs.append({
-                "source": "WeWorkRemotely",
-                "title": entry.title,
-                "company": entry.title.split("–")[0].strip() if "–" in entry.title else "Unknown",
-                "date": entry.published,
-                "location": "Remote",
-                "url": entry.link,
-                "description": entry.summary[:200] + "..."
-            })
+    try:
+        feed = feedparser.parse("https://weworkremotely.com/categories/remote-programming-jobs.rss")
+        for entry in feed.entries:
+            if matches_keywords(entry.title) or exclude_keywords(entry.title):
+                jobs.append({
+                    "source": "WeWorkRemotely",
+                    "title": entry.title,
+                    "company": entry.title.split("–")[0].strip() if "–" in entry.title else "Unknown",
+                    "date": entry.published,
+                    "location": "Remote",
+                    "url": entry.link,
+                    "description": entry.summary[:200] + "..."
+                })
+        logger.info(f"WeWorkRemotely found {len(jobs)} matching jobs.")
+    except Exception as e:
+        logger.error(f"Error scraping WeWorkRemotely: {e}")
     return jobs
 
-# =========================
-# Run Scrapers
-# =========================
 def run_scrapers():
+    logger.info("Starting scrapers...")
     init_db()
-    sources = [scrape_remoteok, scrape_weworkremotely]
-    for scrape_func in sources:
-        jobs = scrape_func()
-        for job in jobs:
+    for scraper in (scrape_remoteok, scrape_weworkremotely):
+        for job in scraper():
             save_job(job)
-    print("Scraping complete.")
+    logger.info("Scraping complete.")
 
-# =========================
-# Flask API
-# =========================
 app = Flask(__name__)
 
-@app.route("/jobs", methods=["GET"])
+@app.route("/jobs")
 def get_jobs():
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT source, title, company, date_posted, location, url, description FROM jobs ORDER BY date_posted DESC")
-    rows = cursor.fetchall()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM jobs ORDER BY date DESC")
+    jobs = [dict(row) for row in c.fetchall()]
     conn.close()
-
-    jobs = []
-    for row in rows:
-        jobs.append({
-            "source": row[0],
-            "title": row[1],
-            "company": row[2],
-            "date": row[3],
-            "location": row[4],
-            "url": row[5],
-            "description": row[6]
-        })
     return jsonify(jobs)
 
 if __name__ == "__main__":

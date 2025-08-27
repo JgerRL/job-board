@@ -5,6 +5,7 @@ import time
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify
 from log_wrapper import LogWrapper 
+import re
 
 logger = LogWrapper(name="job_scraper").logger
 
@@ -62,7 +63,7 @@ def scrape_remoteok():
                         "date": job["date"],
                         "location": job.get("location", "Remote"),
                         "url": job["url"],
-                        "description": job.get("description", "")[:200] + "..."
+                        "description": BeautifulSoup(job.get("description", ""), "html.parser").get_text()[:200] + "..."
                     })
         logger.info(f"RemoteOK found {len(jobs)} matching jobs.")
     except Exception as e:
@@ -77,14 +78,21 @@ def scrape_weworkremotely():
         feed = feedparser.parse("https://weworkremotely.com/categories/remote-programming-jobs.rss")
         for entry in feed.entries:
             if matches_keywords(entry.title) or exclude_keywords(entry.title):
+                # In the summary field, the headquarters is often mentioned; we skip it for brevity
+                summary = BeautifulSoup(entry.summary, "html.parser").get_text()
+                # Remove unnecessary info:
+                summary = summary.split("URL:")[1]  # Skip URL info
+                # Remove all links
+                summary = re.sub(r"http\S+|www\S+|https\S+", "", summary, flags=re.MULTILINE)
+
                 jobs.append({
                     "source": "WeWorkRemotely",
-                    "title": entry.title,
-                    "company": entry.title.split("–")[0].strip() if "–" in entry.title else "Unknown",
+                    "title": entry.title.split(":")[1].strip() if ":" in entry.title else entry.title,
+                    "company": entry.title.split(":")[0].strip() if ":" in entry.title else "Unknown",
                     "date": entry.published,
                     "location": "Remote",
                     "url": entry.link,
-                    "description": entry.summary[:200] + "..."
+                    "description": summary[:200] + "..."
                 })
         logger.info(f"WeWorkRemotely found {len(jobs)} matching jobs.")
     except Exception as e:

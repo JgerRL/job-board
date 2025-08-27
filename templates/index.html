@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Search & Filters -->
+<form method="get" action="/" class="mb-6 grid grid-cols-1 md:grid-cols-12 gap-3">
+  <input type="text" name="q" value="{{ active.q }}" placeholder="Search title, company, description"
+         class="md:col-span-5 col-span-12 border rounded-lg px-3 py-2" />
+  <input type="text" name="location" value="{{ active.location }}" placeholder="Location (e.g. Remote, EU, Berlin)"
+         class="md:col-span-3 col-span-12 border rounded-lg px-3 py-2" />
+  <select name="source" class="md:col-span-2 col-span-12 border rounded-lg px-3 py-2">
+    <option value="">All sources</option>
+    {% for s in sources %}
+      <option value="{{ s }}" {% if active.source==s %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="per_page" class="md:col-span-1 col-span-6 border rounded-lg px-3 py-2">
+    {% for n in [10,20,30,50] %}
+      <option value="{{ n }}" {% if active.per_page==n %}selected{% endif %}>{{ n }}/page</option>
+    {% endfor %}
+  </select>
+  <button class="md:col-span-1 col-span-6 bg-black text-white rounded-lg px-3 py-2">Search</button>
+</form>
+
+<!-- Results header -->
+<div class="flex items-center justify-between mb-3">
+  <div class="text-sm text-gray-600">
+    Showing page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong>
+    ({{ total }} jobs)
+  </div>
+  <div class="flex gap-2">
+    {% if prev_url %}
+      <a href="{{ prev_url }}" class="px-3 py-2 border rounded-lg">← Prev</a>
+    {% endif %}
+    {% if next_url %}
+      <a href="{{ next_url }}" class="px-3 py-2 border rounded-lg">Next →</a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Job list -->
+<ul class="space-y-3">
+  {% for j in jobs %}
+    <li class="bg-white rounded-xl p-4 border hover:shadow-sm transition">
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span class="text-sm px-2 py-1 rounded-full border">{{ j['source'] }}</span>
+        <a href="{{ j['url'] }}" target="_blank" class="text-lg font-semibold hover:underline">
+          {{ j['title'] }}
+        </a>
+      </div>
+      <div class="mt-1 text-sm text-gray-600">
+        <span class="font-medium">{{ j['company'] }}</span>
+        <span class="mx-2">•</span>
+        <span>{{ j['location'] }}</span>
+        {% if j['date'] %}<span class="mx-2">•</span><span>{{ j['date'] }}</span>{% endif %}
+      </div>
+      {% if j['description'] %}
+        <p class="mt-2 text-gray-700 text-sm line-clamp-3">{{ j['description'] }}</p>
+      {% endif %}
+      <div class="mt-3">
+        <a href="{{ j['url'] }}" target="_blank" class="text-sm font-medium text-blue-700 hover:underline">View job →</a>
+      </div>
+    </li>
+  {% endfor %}
+</ul>
+
+<!-- Bottom pager -->
+<div class="mt-6 flex items-center justify-between">
+  <div></div>
+  <div class="flex gap-2">
+    {% if prev_url %}
+      <a href="{{ prev_url }}" class="px-3 py-2 border rounded-lg">← Prev</a>
+    {% endif %}
+    {% if next_url %}
+      <a href="{{ next_url }}" class="px-3 py-2 border rounded-lg">Next →</a>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

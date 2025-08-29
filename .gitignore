@@ -66,6 +66,7 @@ coverage.xml
 .DS_Store
 
 # Logs
+logs/
 *.log
 
 # Other
